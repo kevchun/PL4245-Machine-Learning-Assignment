@@ -1,0 +1,413 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+### TASK 0 [0 marks]
+#### Run the following code: 
+
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+library(rpart)
+library(randomForest)
+library(rpart.plot)
+library(ROCR)
+library(ggplot2)
+library(vip)
+
+train.dat <- read.csv("train.csv")
+test.dat <- read.csv("test.csv")
+dim(train.dat)
+dim(test.dat)
+```
+
+### TASK 1 [5 Marks]
+#### Train a logistic regression model. Display the best ROC metric, variable importance, ROC curve on test data, and test AUC.
+
+
+```{r, warning=FALSE}
+train.dat$Class<-as.factor(train.dat$Class)
+test.dat$Class<-as.factor(test.dat$Class)
+
+tr.ctrl <- trainControl(method = "repeatedcv", 
+                         number = 10, 
+                         repeats = 5,
+                        summaryFunction = twoClassSummary,
+                        classProbs = TRUE
+                        )
+    #Train Logistic model
+        set.seed(11032020)
+        log.fit <- train(Class ~ ., data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "glm", family = "binomial", 
+                         metric = "ROC",
+                         preProcess = c("center", "scale"))
+    #Variable importance
+    p.log <- vip(log.fit)+ ggtitle("Logistic Regression Variable Importance")
+    p.log
+    
+
+    #Compare prediction
+    prob.pred.log<-predict(log.fit,newdata = test.dat, type = "prob")
+    prob.pred.log<-prob.pred.log[,2]
+    prediction.list.log <- prediction(prob.pred.log, labels = test.dat$Class)
+    perf.log <- performance(prediction.list.log, measure="tpr", x.measure="fpr")
+    
+    #Best ROC
+    perf.log.x <- perf.log@x.values[[1]]
+    perf.log.y <- perf.log@y.values[[1]]
+    perf.log.df<-data.frame(perf.log.x,perf.log.y)
+    perf.log.cutoff <- prediction.list.log@cutoffs[[1]]
+    log.acc <- performance(prediction.list.log, measure="acc")
+    log.accuracy <- log.acc@y.values[[1]]
+    
+    #create dataframe:
+    roc.log.df <- data.frame(sensitivity = perf.log.y,
+                         FPR = perf.log.x,
+                         specificity = 1- perf.log.x,
+                         accuracy = log.accuracy,
+                         prob.cutoff = perf.log.cutoff )
+    
+    #get optimal threshold:
+    opt.threshold.index <-  which.max(roc.log.df$specificity + roc.log.df$sensitivity)
+    opt.threshold.index <-  which.min(roc.log.df$FPR + 1-roc.log.df$sensitivity)
+    
+    #display optimal threshold results:
+    roc.log.df[opt.threshold.index, ]
+
+    # Plot ROC
+        plot(perf.log, colorize = TRUE, main="Logistic Regression ROC",
+             print.cutoffs.at = roc.log.df$prob.cutoff[opt.threshold.index],
+             text.adj = c(-0.2, 1.7))
+        abline(a=0, b=1, lty=2)
+    
+    #AUC
+    AUC = as.numeric(performance(prediction.list.log, "auc")@y.values)
+    print(paste("Test loggistic regression AUC is ", AUC,".", sep=""))
+    
+
+    
+```
+
+
+### Task 2 [5 marks]
+####  Train a LASSO model. Display the best ROC metric, variable importance, ROC curve on test data, and test AUC.
+
+
+```{r, warning=FALSE}
+set.seed(11032020)
+
+    #Train LASSO model    
+    lasso.fit <- train(Class ~ ., data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "glmnet", family = "binomial", 
+                         metric = "ROC",
+                         preProcess = c("center", "scale"),
+                         tuneGrid = 
+                          expand.grid(alpha = 1, 
+                          lambda = seq(0.006, 0.008, length.out = 100))
+                         )
+
+    #Variable importance
+    p.lasso <- vip(lasso.fit)+ ggtitle("LASSO Variable Importance")
+    p.lasso
+    
+    #Compare prediction
+    prob.pred.lasso<-predict(lasso.fit,newdata = test.dat, type = "prob")
+    prob.pred.lasso<-prob.pred.lasso[,2]
+    prediction.list.lasso <- prediction(prob.pred.lasso, labels = test.dat$Class)
+    perf.lasso <- performance(prediction.list.lasso, measure="tpr", x.measure="fpr")
+    
+    #Best ROC
+    perf.lasso.x <- perf.lasso@x.values[[1]]
+    perf.lasso.y <- perf.lasso@y.values[[1]]
+    perf.lasso.cutoff <- prediction.list.lasso@cutoffs[[1]]
+    lasso.acc <- performance(prediction.list.lasso, measure="acc")
+    lasso.accuracy <- lasso.acc@y.values[[1]]
+    
+    #create dataframe:
+    roc.lasso.df <- data.frame(sensitivity = perf.lasso.y,
+                         FPR = perf.lasso.x,
+                         specificity = 1- perf.lasso.x,
+                         accuracy = lasso.accuracy,
+                         prob.cutoff = perf.lasso.cutoff )
+    
+    #get optimal threshold:
+    opt.threshold.index <-  which.max(roc.lasso.df$specificity + roc.lasso.df$sensitivity)
+    opt.threshold.index <-  which.min(roc.lasso.df$FPR + 1-roc.lasso.df$sensitivity)
+    
+    # LASSO best tune
+    lasso.fit$bestTune
+    
+    #display optimal threshold results:
+    roc.lasso.df[opt.threshold.index, ]
+
+    # Plot ROC
+        plot(perf.lasso, colorize = TRUE, main="LASSO ROC",
+             print.cutoffs.at = roc.lasso.df$prob.cutoff[opt.threshold.index],
+             text.adj = c(-0.2, 1.7))
+        abline(a=0, b=1, lty=2)
+    
+    #AUC
+    AUC = as.numeric(performance(prediction.list.lasso, "auc")@y.values)
+    print(paste("Test LASSO AUC is ", AUC,".", sep=""))
+
+```
+
+
+### Task 3 [5 marks]
+####  Train a Tree. Display the best ROC metric, variable importance, ROC curve on test data, and test AUC.
+
+
+```{r, warning=FALSE}
+set.seed(11032020)
+
+    #Train Tree    
+    tree.fit <- train(Class ~ ., data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "rpart", 
+                         metric = "ROC",
+                         preProcess = c("center", "scale"),
+                         tuneGrid = expand.grid
+                            (cp= seq(0.0001, 1, length.out = 100))
+                         )
+
+
+    
+    #Variable importance
+    rpart.plot(tree.fit$finalModel)
+    p.tree <- vip(tree.fit)+ ggtitle("Tree Variable Importance")
+    p.tree
+    
+    #Compare prediction
+    prob.pred.tree<-predict(tree.fit,newdata = test.dat, type = "prob")
+    prob.pred.tree<-prob.pred.tree[,2]
+    prediction.list.tree <- prediction(prob.pred.tree, labels = test.dat$Class)
+    perf.tree <- performance(prediction.list.tree, measure="tpr", x.measure="fpr")
+    
+    #Best ROC
+    perf.tree.x <- perf.tree@x.values[[1]]
+    perf.tree.y <- perf.tree@y.values[[1]]
+    perf.tree.cutoff <- prediction.list.tree@cutoffs[[1]]
+    tree.acc <- performance(prediction.list.tree, measure="acc")
+    tree.accuracy <- tree.acc@y.values[[1]]
+    
+    #create dataframe:
+    roc.tree.df <- data.frame(sensitivity = perf.tree.y,
+                         FPR = perf.tree.x,
+                         specificity = 1- perf.tree.x,
+                         accuracy = tree.accuracy,
+                         prob.cutoff = perf.tree.cutoff )
+    
+    #get optimal threshold:
+    opt.threshold.index <-  which.max(roc.tree.df$specificity + roc.tree.df$sensitivity)
+    opt.threshold.index <-  which.min(roc.tree.df$FPR + 1-roc.tree.df$sensitivity)
+    
+    # Tree best tune
+    tree.fit$bestTune
+    
+    #display optimal threshold results:
+    roc.tree.df[opt.threshold.index, ]
+
+    # Plot ROC
+        plot(perf.tree, colorize = TRUE, main="tree ROC",
+             print.cutoffs.at = roc.tree.df$prob.cutoff[opt.threshold.index],
+             text.adj = c(-0.2, 1.7))
+        abline(a=0, b=1, lty=2)
+    
+    #AUC
+    AUC = as.numeric(performance(prediction.list.tree, "auc")@y.values)
+    print(paste("Test tree AUC is ", AUC,".", sep=""))
+
+```
+
+### Task 4 [5 marks]
+####  Train a Random Forest. Display the best ROC metric, variable importance, ROC curve on test data, and test AUC.
+
+```{r, warning=FALSE}
+set.seed(11032020)
+mtry.df<-data.frame(rbind(3,12))
+colnames(mtry.df)<-"mtry"
+    #Train Random Forest    
+    rf.fit <- train(Class ~ ., data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "rf", 
+                         metric = "ROC",
+                         ntree=550,
+                         preProcess = c("center", "scale"),
+                         tuneGrid = mtry.df
+                         )
+
+
+    
+    #Variable importance
+    p.rf <- vip(rf.fit)+ ggtitle("Random Forest Variable Importance")
+    p.rf
+    
+    #Compare prediction
+    prob.pred.rf<-predict(rf.fit,newdata = test.dat, type = "prob")
+    prob.pred.rf<-prob.pred.rf[,2]
+    prediction.list.rf <- prediction(prob.pred.rf, labels = test.dat$Class)
+    perf.rf <- performance(prediction.list.rf, measure="tpr", x.measure="fpr")
+    
+    #Best ROC
+    perf.rf.x <- perf.rf@x.values[[1]]
+    perf.rf.y <- perf.rf@y.values[[1]]
+    perf.rf.cutoff <- prediction.list.rf@cutoffs[[1]]
+    rf.acc <- performance(prediction.list.rf, measure="acc")
+    rf.accuracy <- rf.acc@y.values[[1]]
+    
+    #create dataframe:
+    roc.rf.df <- data.frame(sensitivity = perf.rf.y,
+                         FPR = perf.rf.x,
+                         specificity = 1- perf.rf.x,
+                         accuracy = rf.accuracy,
+                         prob.cutoff = perf.rf.cutoff )
+    
+    #get optimal threshold:
+    opt.threshold.index <-  which.max(roc.rf.df$specificity + roc.rf.df$sensitivity)
+    opt.threshold.index <-  which.min(roc.rf.df$FPR + 1-roc.rf.df$sensitivity)
+    
+    # rf best tune
+    rf.fit$bestTune
+    
+    #display optimal threshold results:
+    roc.rf.df[opt.threshold.index, ]
+
+    # Plot ROC
+        plot(perf.rf, colorize = TRUE, main="Random Forest ROC",
+             print.cutoffs.at = roc.rf.df$prob.cutoff[opt.threshold.index],
+             text.adj = c(-0.2, 1.7))
+        abline(a=0, b=1, lty=2)
+    
+    #AUC
+    AUC = as.numeric(performance(prediction.list.rf, "auc")@y.values)
+    print(paste("Test Random Forest AUC is ", AUC,".", sep=""))
+```
+
+### TASK 5 [2 Marks]
+#### Use resampling performances of the best models of each method to select the best overall model/method. Which is the best method?
+
+```{r}
+model.resamples <- resamples(list(logistic = log.fit, lasso = lasso.fit, tree = tree.fit, rforest = rf.fit))
+
+summary(model.resamples)
+
+print(paste("Random Forest is the best method since it has the highest accuracy."))
+```
+
+### Task 6 [2 Marks]
+#### Draw Test ROC curve for selected models of all methods in a single plot:
+
+```{r}
+perf.log.df<-data.frame(fpr=perf.log.x,tpr=perf.log.y)
+perf.log.df$method<-"Logistic"
+perf.lasso.df<-data.frame(fpr=perf.lasso.x,tpr=perf.lasso.y)
+perf.lasso.df$method<-"LASSO"
+perf.tree.df<-data.frame(fpr=perf.tree.x,tpr=perf.tree.y)
+perf.tree.df$method<-"Tree"
+perf.rf.df<-data.frame(fpr=perf.rf.x,tpr=perf.rf.y)
+perf.rf.df$method<-"Random Forest"
+perf.all.df<-rbind(perf.log.df,perf.lasso.df,perf.tree.df,perf.rf.df)
+
+ggplot(perf.all.df, aes(x = fpr, y = tpr, color = method)) +
+  geom_line() +
+  geom_abline(intercept = 0, slope = 1, lty = 3) +
+  xlab("False Positive Rate") +
+  ylab("True Positive Rate") +
+  ggtitle("ROC Curve") +
+  theme_bw()
+```
+
+### Task 7 [Bonus 2 marks]
+#### Draw contour plot with x1 and x2 predictors for probability predictions on test data for all methods, showing the prob = 0.5 cut off
+
+```{r, warning=FALSE}
+#prepare a grid to get equal intervals of predictor values:
+grid.length = 100
+df.grid <- expand.grid(x1 = seq(min(test.dat$x1),
+                            max(test.dat$x1),
+                            length.out = grid.length ),
+                       x2 = seq(min(test.dat$x2),
+                            max(test.dat$x2),
+                            length.out = grid.length )
+)
+
+#new models:
+set.seed(11032020)
+log.fit2 <- train(Class ~ x1 + x2 , data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "glm", family = "binomial", 
+                         metric = "ROC",
+                         preProcess = c("center", "scale"))
+
+set.seed(11032020)
+lasso.fit2 <- train(Class ~ x1 + x2 , data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "glmnet", family = "binomial", 
+                         metric = "ROC",
+                         preProcess = c("center", "scale"),
+                         tuneGrid = 
+                          expand.grid(alpha = 1, 
+                          lambda = seq(0.006, 0.008, length.out = 100))
+                         )
+set.seed(11032020)
+tree.fit2 <- train(Class ~ x1 + x2 , data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "rpart", 
+                         metric = "ROC",
+                         preProcess = c("center", "scale"),
+                         tuneGrid = expand.grid
+                            (cp= seq(0.0001, 1, length.out = 100))
+                         )
+set.seed(11032020)
+rf.fit2 <- train(Class ~ x1 + x2 , data = train.dat, 
+                         trControl = tr.ctrl,
+                         method = "rf", 
+                         metric = "ROC",
+                         ntree=550,
+                         preProcess = c("center", "scale")
+                         )
+
+#get predictions        
+df.grid$log <- predict(log.fit2, df.grid, 
+                             type = "prob")[, 2]
+df.grid$lasso = predict(lasso.fit2, df.grid, 
+                             type = "prob")[, 2]
+df.grid$tree = predict(tree.fit2, df.grid, 
+                             type = "prob")[, 2]
+df.grid$rf = predict(rf.fit2, df.grid, 
+                             type = "prob")[, 2]
+
+
+# convert to long for easy plotting:
+df.grid.long <- reshape2::melt(df.grid, 
+                               measure.vars = 
+                                 c("log",
+                                   "lasso",
+                                   "tree",
+                                   "rf")
+                               , variable.name = "Method"
+                               , value.name = "Prob"
+                               )
+
+
+# ggplot:
+ggplot(test.dat, aes(x =x1, 
+                      y = x2, 
+                      color = Class )) +
+  geom_point(alpha = 0.3) +
+  theme_bw() + 
+  stat_contour(data = df.grid.long, 
+               aes(z= Prob),
+               size = 0.2, lty = 1,color = "blue",
+               breaks=c(0.5))  +
+  geom_point(data = df.grid.long, aes(x =x1, 
+                      y = x2)
+, size = 0.01, color = as.numeric(df.grid.long$Prob>=0.5) + 2, alpha = 0.3)+
+  facet_wrap(~Method) +
+  theme(legend.position = "none")
+```
+
